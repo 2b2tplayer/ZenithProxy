@@ -2,6 +2,7 @@ package com.zenith;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.github.steveice10.mc.protocol.MinecraftConstants;
 import com.github.steveice10.mc.protocol.packet.ingame.clientbound.*;
 import com.github.steveice10.mc.protocol.packet.ingame.clientbound.entity.*;
@@ -20,6 +21,7 @@ import com.github.steveice10.mc.protocol.packet.ingame.serverbound.player.*;
 import com.github.steveice10.mc.protocol.packet.login.clientbound.ClientboundGameProfilePacket;
 import com.github.steveice10.mc.protocol.packet.login.serverbound.ServerboundHelloPacket;
 import com.google.common.io.Files;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.zenith.cache.DataCache;
@@ -88,6 +90,7 @@ public class Shared {
     public static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     static {
         OBJECT_MAPPER.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        OBJECT_MAPPER.registerModule(new JavaTimeModule());
     }
     public static final Logger DEFAULT_LOG = LoggerFactory.getLogger("Proxy");
     public static final Logger AUTH_LOG = LoggerFactory.getLogger("Auth");
@@ -109,7 +112,7 @@ public class Shared {
         if (reason.equals(SYSTEM_DISCONNECT) || reason.equals(MANUAL_DISCONNECT) || reason.equals(MinecraftConstants.SERVER_CLOSING_MESSAGE)) {
             return false;
         } else if (reason.equals(AUTO_DISCONNECT)) {
-            return !CONFIG.client.extra.utility.actions.autoDisconnect.cancelAutoReconnect;
+            return (!CONFIG.client.extra.utility.actions.autoDisconnect.cancelAutoReconnect && !Proxy.getInstance().getIsPrio().orElse(false));
         } else {
             return true;
         }
@@ -333,7 +336,7 @@ public class Shared {
     }
 
     public static void saveConfigAsync() {
-        Thread.ofVirtual().start(Shared::saveConfig);
+        Thread.ofVirtual().name("Async Config Save").start(Shared::saveConfig);
     }
 
     public static synchronized void saveConfig() {
@@ -384,9 +387,15 @@ public class Shared {
             Thread.setDefaultUncaughtExceptionHandler((thread, e) -> {
                 DEFAULT_LOG.error("Uncaught exception in thread {}", thread, e);
             });
-            SCHEDULED_EXECUTOR_SERVICE = Executors.newScheduledThreadPool(16);
+            SCHEDULED_EXECUTOR_SERVICE = Executors.newScheduledThreadPool(4, new ThreadFactoryBuilder()
+                .setNameFormat("ZenithProxy Scheduled Executor - #%d")
+                .setDaemon(true)
+                .build());
             DISCORD_BOT = new DiscordBot();
-            EVENT_BUS = new SimpleEventBus();
+            EVENT_BUS = new SimpleEventBus(Executors.newFixedThreadPool(2, new ThreadFactoryBuilder()
+                .setNameFormat("ZenithProxy Async EventBus - #%d")
+                .setDaemon(true)
+                .build()));
             CACHE = new DataCache();
             WHITELIST_MANAGER = new WhitelistManager();
             PRIORITY_BAN_CHECKER = new PriorityBanChecker();

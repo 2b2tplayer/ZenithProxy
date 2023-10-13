@@ -104,7 +104,7 @@ public class KillAura extends Module {
     private Entity findTarget() {
         for (Entity entity : CACHE.getEntityCache().getEntities().values()) {
             if (!validTarget(entity)) continue;
-            if (distanceToSelf(entity) > 3.5) continue;
+            if (distanceToSelf(entity) > CONFIG.client.extra.killAura.attackRange) continue;
             return entity;
         }
         return null;
@@ -135,8 +135,10 @@ public class KillAura extends Module {
     }
 
     private void attack(final Entity entity) {
-        sendClientPacketAsync(new ServerboundSwingPacket(weaponSlot == EquipmentSlot.MAIN_HAND ? Hand.MAIN_HAND : Hand.OFF_HAND));
-        sendClientPacketAsync(new ServerboundInteractPacket(entity.getEntityId(), InteractAction.ATTACK, false));
+        sendClientPacketsAsync(
+            new ServerboundInteractPacket(entity.getEntityId(), InteractAction.ATTACK, false),
+            new ServerboundSwingPacket(weaponSlot == EquipmentSlot.MAIN_HAND ? Hand.MAIN_HAND : Hand.OFF_HAND)
+        );
     }
 
     private boolean rotateTo(Entity entity) {

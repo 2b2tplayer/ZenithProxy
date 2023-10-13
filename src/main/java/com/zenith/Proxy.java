@@ -225,7 +225,7 @@ public class Proxy {
                 while (!DISCORD_BOT.isMessageQueueEmpty() && count++ < 10) {
                     Wait.waitALittleMs(100);
                 }
-                DISCORD_BOT.stop();
+                DISCORD_BOT.stop(true);
             }).get(10L, TimeUnit.SECONDS);
         } catch (final Exception e) {
             DEFAULT_LOG.error("Error shutting down gracefully", e);
@@ -499,7 +499,7 @@ public class Proxy {
                 && ((nonNull(this.currentPlayer.get()) && this.currentPlayer.get().isConnected() && activeHoursConfig.forceReconnect)
                             || (isNull(this.currentPlayer.get()) || !this.currentPlayer.get().isConnected()))) {
             // get current queue wait time
-            Integer queueLength = (CONFIG.authentication.prio ? Queue.getQueueStatus().prio : Queue.getQueueStatus().regular);
+            int queueLength = (CONFIG.authentication.prio ? Queue.getQueueStatus().prio() : Queue.getQueueStatus().regular());
             double queueWaitSeconds = Queue.getQueueWait(queueLength);
             activeHoursConfig.activeTimes.stream()
                     .flatMap(activeTime -> {
@@ -547,7 +547,11 @@ public class Proxy {
                 }
                 this.serverIcon = netInputStream.readAllBytes();
                 if (DISCORD_BOT.isRunning()) {
-                    DISCORD_BOT.updateProfileImage(this.serverIcon);
+                    if (CONFIG.discord.manageProfileImage) DISCORD_BOT.updateProfileImage(this.serverIcon);
+                    if (CONFIG.discord.manageNickname) DISCORD_BOT.setBotNickname(CONFIG.authentication.username + " | ZenithProxy");
+                    if (CONFIG.discord.manageDescription) DISCORD_BOT.setBotDescription("ZenithProxy " + LAUNCH_CONFIG.version
+                                                                                            + "\n\n**Official Discord**:\n  https://discord.gg/nJZrSaRKtb"
+                                                                                            + "\n**Github**:\n  https://github.com/rfresh2/ZenithProxy");
                 }
             }
         } catch (Exception e) {

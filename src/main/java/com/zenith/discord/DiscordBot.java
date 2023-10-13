@@ -27,10 +27,8 @@ import discord4j.core.object.presence.ClientPresence;
 import discord4j.core.object.presence.Status;
 import discord4j.core.spec.EmbedCreateSpec;
 import discord4j.core.spec.MessageCreateSpec;
-import discord4j.discordjson.json.EmbedData;
-import discord4j.discordjson.json.ImmutableUserModifyRequest;
-import discord4j.discordjson.json.MessageCreateRequest;
-import discord4j.discordjson.json.MessageData;
+import discord4j.discordjson.Id;
+import discord4j.discordjson.json.*;
 import discord4j.discordjson.possible.Possible;
 import discord4j.gateway.GatewayReactorResources;
 import discord4j.gateway.intent.Intent;
@@ -141,7 +139,6 @@ public class DiscordBot {
                 .setInitialPresence(shardInfo -> disconnectedPresence.get())
                 .login()
                 .block();
-
         restClient = client.getRestClient();
         mainRestChannel = restClient.getChannelById(Snowflake.of(CONFIG.discord.channelId));
         relayRestChannel = restClient.getChannelById(Snowflake.of(CONFIG.discord.chatRelay.channelId));
@@ -197,7 +194,31 @@ public class DiscordBot {
         this.isRunning = true;
     }
 
-    public synchronized void stop() {
+    public void setBotNickname(final String nick) {
+        try {
+            final Id guildId = mainRestChannel.getData().block().guildId().get();
+            restClient.getGuildById(Snowflake.of(guildId))
+                .modifyCurrentMember(ImmutableCurrentMemberModifyData.builder()
+                                         .nick(nick)
+                                         .build())
+                .block();
+        } catch (final Exception e) {
+            DISCORD_LOG.error("Failed updating bot's nickname", e);
+        }
+    }
+
+    public void setBotDescription(String description) {
+        try {
+            restClient.getApplicationService().setCurrentApplicationInfo(ImmutableApplicationInfoRequest.builder()
+                                                                             .description(description)
+                                                                             .build())
+                .block();
+        } catch (final Exception e) {
+            DISCORD_LOG.error("Failed updating bot's description", e);
+        }
+    }
+
+    public synchronized void stop(boolean clearQueue) {
         if (!this.isRunning) return;
         if (eventSubscription != null) {
             eventSubscription.unsubscribe();
@@ -210,8 +231,10 @@ public class DiscordBot {
         if (restClient != null) restClient = null;
         if (mainRestChannel != null) mainRestChannel = null;
         if (relayRestChannel != null) relayRestChannel = null;
-        this.mainChannelMessageQueue.clear();
-        this.relayChannelMessageQueue.clear();
+        if (clearQueue) {
+            this.mainChannelMessageQueue.clear();
+            this.relayChannelMessageQueue.clear();
+        }
         this.isRunning = false;
     }
 
@@ -293,9 +316,9 @@ public class DiscordBot {
 
     private String queuePositionStr() {
         if (Proxy.getInstance().getIsPrio().orElse(false))
-            return Proxy.getInstance().getQueuePosition() + " / " + Queue.getQueueStatus().prio + " - ETA: " + Queue.getQueueEta(Proxy.getInstance().getQueuePosition());
+            return Proxy.getInstance().getQueuePosition() + " / " + Queue.getQueueStatus().prio() + " - ETA: " + Queue.getQueueEta(Proxy.getInstance().getQueuePosition());
         else
-            return Proxy.getInstance().getQueuePosition() + " / " + Queue.getQueueStatus().regular + " - ETA: " + Queue.getQueueEta(Proxy.getInstance().getQueuePosition());
+            return Proxy.getInstance().getQueuePosition() + " / " + Queue.getQueueStatus().regular() + " - ETA: " + Queue.getQueueEta(Proxy.getInstance().getQueuePosition());
     }
 
     static boolean validateButtonInteractionEventFromAccountOwner(final ButtonInteractionEvent event) {
@@ -563,8 +586,8 @@ public class DiscordBot {
         sendEmbedMessage(EmbedCreateSpec.builder()
                 .title("Started Queuing")
                 .color(Color.MOON_YELLOW)
-                .addField("Regular Queue", "" + Queue.getQueueStatus().regular, true)
-                .addField("Priority Queue", "" + Queue.getQueueStatus().prio, true)
+                .addField("Regular Queue", "" + Queue.getQueueStatus().regular(), true)
+                .addField("Priority Queue", "" + Queue.getQueueStatus().prio(), true)
                 .build());
         this.client.updatePresence(getQueuePresence()).block();
     }
@@ -759,9 +782,9 @@ public class DiscordBot {
     public void handleActiveHoursConnectEvent(ActiveHoursConnectEvent event) {
         int queueLength;
         if (Proxy.getInstance().getIsPrio().orElse(false)) {
-            queueLength = Queue.getQueueStatus().prio;
+            queueLength = Queue.getQueueStatus().prio();
         } else {
-            queueLength = Queue.getQueueStatus().regular;
+            queueLength = Queue.getQueueStatus().regular();
         }
         sendEmbedMessage(EmbedCreateSpec.builder()
                 .title("Active Hours Connect Triggered")
