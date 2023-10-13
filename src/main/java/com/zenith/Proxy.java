@@ -643,7 +643,7 @@ public class Proxy {
         if (CONFIG.client.extra.chat.showConnectionMessages) {
             ServerConnection serverConnection = getCurrentPlayer().get();
             if (nonNull(serverConnection) && serverConnection.isLoggedIn()) {
-                serverConnection.sendDirect(new ClientboundSystemChatPacket(MineDown.parse("&7" + event.playerEntry().getName() + "&7 joined"), false));
+                serverConnection.sendDirect(new ClientboundSystemChatPacket(MineDown.parse("&7" + event.playerEntry().getName() + "&r&7 joined"), false));
             }
         }
     }
