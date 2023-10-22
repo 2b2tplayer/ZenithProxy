@@ -22,6 +22,7 @@ import com.github.steveice10.mc.protocol.packet.ingame.serverbound.inventory.Ser
 import com.github.steveice10.packetlib.packet.Packet;
 import com.zenith.Proxy;
 import com.zenith.cache.CachedData;
+import com.zenith.cache.data.entity.Entity;
 import com.zenith.cache.data.entity.EntityCache;
 import com.zenith.cache.data.entity.EntityPlayer;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMaps;
@@ -32,9 +33,11 @@ import lombok.experimental.Accessors;
 
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
-import static com.zenith.Shared.*;
+import static com.zenith.Shared.CACHE;
+import static com.zenith.Shared.CLIENT_LOG;
 import static java.util.Objects.nonNull;
 
 
@@ -69,6 +72,7 @@ public class PlayerCache implements CachedData {
     protected boolean isSprinting = false;
     protected Map<String, Map<String, int[]>> tags = new HashMap<>();
     protected EntityEvent opLevel = EntityEvent.PLAYER_OP_PERMISSION_LEVEL_0;
+    protected AtomicInteger actionId = new AtomicInteger(0);
 
     public PlayerCache(final EntityCache entityCache) {
         this.entityCache = entityCache;
@@ -133,7 +137,7 @@ public class PlayerCache implements CachedData {
                                                                                          ContainerActionType.CREATIVE_GRAB_MAX_STACK,
                                                                                          CreativeGrabAction.GRAB,
                                                                                          new ItemStack(1, 1),
-                                                                                         Int2ObjectMaps.emptyMap()), SCHEDULED_EXECUTOR_SERVICE);
+                                                                                         Int2ObjectMaps.emptyMap()));
                 double x = CACHE.getPlayerCache().getX();
                 double y = CACHE.getPlayerCache().getY() + 1000d;
                 double z = CACHE.getPlayerCache().getZ();
@@ -240,5 +244,12 @@ public class PlayerCache implements CachedData {
     public PlayerCache setUuid(UUID uuid) {
         this.thePlayer.setUuid(uuid);
         return this;
+    }
+
+    public double distanceToSelf(final Entity entity) {
+        return Math.sqrt(
+            Math.pow(getX() - entity.getX(), 2)
+                + Math.pow(getY() - entity.getY(), 2)
+                + Math.pow(getZ() - entity.getZ(), 2));
     }
 }

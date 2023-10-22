@@ -5,10 +5,12 @@ import com.github.steveice10.mc.protocol.packet.ingame.serverbound.ServerboundCh
 import com.google.common.base.Suppliers;
 import com.zenith.Proxy;
 import com.zenith.command.CommandContext;
+import com.zenith.command.CommandOutputHelper;
 import com.zenith.command.DiscordCommandContext;
 import com.zenith.event.Subscription;
 import com.zenith.event.module.AutoEatOutOfFoodEvent;
 import com.zenith.event.proxy.*;
+import com.zenith.feature.autoupdater.AutoUpdater;
 import com.zenith.feature.deathmessages.DeathMessageParseResult;
 import com.zenith.feature.deathmessages.KillerType;
 import com.zenith.feature.queue.Queue;
@@ -47,16 +49,14 @@ import reactor.netty.transport.ProxyProvider;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.*;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static com.zenith.Shared.*;
 import static com.zenith.command.impl.StatusCommand.getCoordinates;
 import static com.zenith.event.SimpleEventBus.pair;
+import static com.zenith.util.math.MathHelper.formatDuration;
 import static discord4j.common.ReactorResources.DEFAULT_BLOCKING_TASK_SCHEDULER;
 import static discord4j.common.ReactorResources.DEFAULT_TIMER_TASK_SCHEDULER;
 import static java.util.Arrays.asList;
@@ -80,6 +80,9 @@ public class DiscordBot {
 
     @Getter
     private boolean isRunning;
+    private ScheduledFuture<?> presenceUpdateFuture;
+    private ScheduledFuture<?> mainChannelMessageQueueProcessFuture;
+    private ScheduledFuture<?> relayChannelMessageQueueProcessFuture;
     private Subscription eventSubscription;
 
     public DiscordBot() {
@@ -165,13 +168,13 @@ public class DiscordBot {
                 if (request != null) {
                     DISCORD_LOG.debug("Discord bot response: {}", request.getJsonPayload());
                     mainChannelMessageQueue.add(request);
-                    if (CONFIG.interactiveTerminal.enable) TERMINAL_MANAGER.logEmbedOutput(context.getEmbedBuilder().build());
+                    CommandOutputHelper.logEmbedOutputToTerminal(context.getEmbedBuilder().build());
                 }
                 if (!context.getMultiLineOutput().isEmpty()) {
                     for (final String line : context.getMultiLineOutput()) {
                         mainChannelMessageQueue.add(MessageCreateSpec.builder().content(line).build().asRequest());
                     }
-                    if (CONFIG.interactiveTerminal.enable) TERMINAL_MANAGER.logMultiLineOutput(context);
+                    CommandOutputHelper.logMultiLineOutputToTerminal(context);
                 }
             } catch (final Exception e) {
                 DISCORD_LOG.error("Failed processing discord command: {}", message, e);
@@ -186,11 +189,11 @@ public class DiscordBot {
         if (CONFIG.discord.isUpdating) {
             handleProxyUpdateComplete();
         }
-        SCHEDULED_EXECUTOR_SERVICE.scheduleAtFixedRate(this::updatePresence, 0L,
+        this.presenceUpdateFuture = SCHEDULED_EXECUTOR_SERVICE.scheduleAtFixedRate(this::updatePresence, 0L,
                 15L, // discord rate limit
                 TimeUnit.SECONDS);
-        SCHEDULED_EXECUTOR_SERVICE.scheduleAtFixedRate(this::processMessageQueue, 0L, 100L, TimeUnit.MILLISECONDS);
-        SCHEDULED_EXECUTOR_SERVICE.scheduleAtFixedRate(this::processRelayMessageQueue, 0L, 100L, TimeUnit.MILLISECONDS);
+        this.mainChannelMessageQueueProcessFuture = SCHEDULED_EXECUTOR_SERVICE.scheduleAtFixedRate(this::processMessageQueue, 0L, 100L, TimeUnit.MILLISECONDS);
+        this.relayChannelMessageQueueProcessFuture = SCHEDULED_EXECUTOR_SERVICE.scheduleAtFixedRate(this::processRelayMessageQueue, 0L, 100L, TimeUnit.MILLISECONDS);
         this.isRunning = true;
     }
 
@@ -220,6 +223,12 @@ public class DiscordBot {
 
     public synchronized void stop(boolean clearQueue) {
         if (!this.isRunning) return;
+        if (this.presenceUpdateFuture != null)
+            this.presenceUpdateFuture.cancel(true);
+        if (this.mainChannelMessageQueueProcessFuture != null)
+            this.mainChannelMessageQueueProcessFuture.cancel(true);
+        if (this.relayChannelMessageQueueProcessFuture != null)
+            this.relayChannelMessageQueueProcessFuture.cancel(true);
         if (eventSubscription != null) {
             eventSubscription.unsubscribe();
             eventSubscription = null;
@@ -273,6 +282,18 @@ public class DiscordBot {
 
     private void updatePresence() {
         try {
+            if (CONFIG.autoUpdater.autoUpdate) {
+                final AutoUpdater autoUpdater = Proxy.getInstance().getAutoUpdater();
+                if (autoUpdater != null
+                    && autoUpdater.getUpdateAvailable()
+                    && Math.random() > 0.75 // 25% chance to show update available
+                ) {
+                    this.client.updatePresence(ClientPresence.of(Status.ONLINE, ClientActivity.custom(
+                        "Update Available" + autoUpdater.getNewVersion().map(v -> ": " + v).orElse(""))))
+                        .block();
+                    return;
+                }
+            }
             if (Proxy.getInstance().isInQueue())
                 this.client.updatePresence(getQueuePresence()).block();
             else if (Proxy.getInstance().isConnected())
@@ -282,8 +303,10 @@ public class DiscordBot {
         } catch (final IllegalStateException e) {
             if (e.getMessage().contains("Backpressure overflow")) {
                 DISCORD_LOG.error("Caught backpressure overflow, restarting discord session", e);
-                this.client.logout().block();
-                createClient();
+                SCHEDULED_EXECUTOR_SERVICE.execute(() -> {
+                    this.stop(false);
+                    this.start();
+                });
             } else throw e;
         } catch (final Exception e) {
             DISCORD_LOG.error("Failed updating discord presence", e);
@@ -370,7 +393,7 @@ public class DiscordBot {
             mainChannelMessageQueue.add(MessageCreateSpec.builder()
                                             .addEmbed(embedCreateSpec)
                                             .build().asRequest());
-            TERMINAL_MANAGER.logEmbedOutput(embedCreateSpec);
+            CommandOutputHelper.logEmbedOutputToTerminal(embedCreateSpec);
         } catch (final Exception e) {
             DISCORD_LOG.error("Failed sending discord embed message", e);
         }
@@ -393,7 +416,7 @@ public class DiscordBot {
                                             .addEmbed(embedCreateSpec)
                                             .build().asRequest());
             TERMINAL_LOG.info(message);
-            TERMINAL_MANAGER.logEmbedOutput(embedCreateSpec);
+            CommandOutputHelper.logEmbedOutputToTerminal(embedCreateSpec);
         } catch (final Exception e) {
             DISCORD_LOG.error("Failed sending discord embed message", e);
         }
@@ -439,7 +462,7 @@ public class DiscordBot {
                                             .components(ActionRow.of(buttons))
                                             .build().asRequest());
             TERMINAL_LOG.info(message);
-            TERMINAL_MANAGER.logEmbedOutput(embedCreateSpec);
+            CommandOutputHelper.logEmbedOutputToTerminal(embedCreateSpec);
             client.getEventDispatcher()
                 .on(ButtonInteractionEvent.class, mapper)
                 .timeout(timeout)
@@ -456,7 +479,7 @@ public class DiscordBot {
                                             .addEmbed(embedCreateSpec)
                                             .components(ActionRow.of(buttons))
                                             .build().asRequest());
-            TERMINAL_MANAGER.logEmbedOutput(embedCreateSpec);
+            CommandOutputHelper.logEmbedOutputToTerminal(embedCreateSpec);
             client.getEventDispatcher()
                 .on(ButtonInteractionEvent.class, mapper)
                 .timeout(timeout)
@@ -538,14 +561,6 @@ public class DiscordBot {
         event.queueWait()
             .ifPresent(duration -> embedBuilder.addField("Queue Duration", formatDuration(duration), true));
         sendEmbedMessage(embedBuilder.build());
-    }
-
-    private String formatDuration(Duration duration) {
-        final StringBuilder sb = new StringBuilder();
-        if (duration.toHoursPart() > 0) sb.append(duration.toHoursPart()).append("h ");
-        if (duration.toMinutesPart() > 0) sb.append(duration.toMinutesPart()).append("m ");
-        sb.append(duration.toSecondsPart()).append("s");
-        return sb.toString();
     }
 
     public void handleDisconnectEvent(DisconnectEvent event) {
@@ -923,11 +938,11 @@ public class DiscordBot {
                 if (this.client.getSelfId().asLong() != messageData.author().id().asLong()) return;
                 final EmbedData embed = messageData.embeds().get(0);
                 final String sender = extractRelayEmbedSenderUsername(embed.color(), embed.description().get());
-                Proxy.getInstance().getClient().send(new ServerboundChatPacket("/w " + sender + " " + event.message()));
+                Proxy.getInstance().getClient().sendAsync(new ServerboundChatPacket("/w " + sender + " " + event.message()));
             } catch (final Exception e) {
                 DISCORD_LOG.error("Error performing chat relay reply", e);
             }
-        } else Proxy.getInstance().getClient().send(new ServerboundChatPacket(event.message()));
+        } else Proxy.getInstance().getClient().sendAsync(new ServerboundChatPacket(event.message()));
         lastRelaymessage = Optional.of(Instant.now());
     }
 

@@ -10,8 +10,6 @@ import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import lombok.Getter;
 
 import java.util.List;
-import java.util.Optional;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static com.zenith.Shared.CONFIG;
@@ -32,14 +30,17 @@ public class CommandManager {
        asList(
            new ActiveHoursCommand(),
            new AntiAFKCommand(),
+           new AuthCommand(),
            new AutoDisconnectCommand(),
            new AutoEatCommand(),
+           new AutoFishCommand(),
            new AutoReconnectCommand(),
            new AutoReplyCommand(),
            new AutoRespawnCommand(),
            new AutoTotemCommand(),
            new AutoUpdateCommand(),
            new ChatRelayCommand(),
+           new CommandConfigCommand(),
            new ConnectCommand(),
            new DatabaseCommand(),
            new DebugCommand(),
@@ -51,12 +52,15 @@ public class CommandManager {
            new IgnoreCommand(),
            new KickCommand(),
            new KillAuraCommand(),
+           new PlaytimeCommand(),
            new PrioCommand(),
            new ProxyClientConnectionCommand(),
+           new QueueStatusCommand(),
            new QueueWarningCommand(),
            new ReconnectCommand(),
            new ReleaseChannelCommand(),
            new RespawnCommand(),
+           new SeenCommand(),
            new SendMessageCommand(),
            new ServerCommand(),
            new SpammerCommand(),
@@ -93,7 +97,7 @@ public class CommandManager {
     public void execute(final CommandContext context) {
         final ParseResults<CommandContext> parse = this.dispatcher.parse(downcaseFirstWord(context.getInput()), context);
         try {
-            executeWithErrorHandler(context, parse);
+            executeWithHandlers(context, parse);
         } catch (final CommandSyntaxException e) {
             // fall through
             // errors handled by delegate
@@ -111,18 +115,25 @@ public class CommandManager {
         }
     }
 
-    private int executeWithErrorHandler(final CommandContext context, final ParseResults<CommandContext> parse) throws CommandSyntaxException {
-        final Optional<Function<CommandContext, Void>> errorHandler = parse.getContext().getNodes().stream().findFirst()
-                .map(ParsedCommandNode::getNode)
-                .filter(node -> node instanceof CaseInsensitiveLiteralCommandNode)
-                .flatMap(commandNode -> ((CaseInsensitiveLiteralCommandNode<CommandContext>) commandNode).getErrorHandler());
+    private int executeWithHandlers(final CommandContext context, final ParseResults<CommandContext> parse) throws CommandSyntaxException {
+        var commandNodeOptional = parse.getContext()
+            .getNodes()
+            .stream()
+            .findFirst()
+            .map(ParsedCommandNode::getNode)
+            .filter(node -> node instanceof CaseInsensitiveLiteralCommandNode)
+            .map(node -> ((CaseInsensitiveLiteralCommandNode<CommandContext>) node));
+        var errorHandler = commandNodeOptional.flatMap(CaseInsensitiveLiteralCommandNode::getErrorHandler);
+        var successHandler = commandNodeOptional.flatMap(CaseInsensitiveLiteralCommandNode::getSuccessHandler);
+
         if (parse.getReader().canRead()) {
             errorHandler.ifPresent(handler -> handler.apply(context));
             return -1;
         }
-        errorHandler.ifPresent(handler -> dispatcher.setConsumer((commandContext, success, result) -> {
-            if (!success) handler.apply(context);
-        }));
+        dispatcher.setConsumer((commandContext, success, result) -> {
+            if (success) successHandler.ifPresent(handler -> handler.apply(context));
+            else errorHandler.ifPresent(handler -> handler.apply(context));
+        });
 
         return dispatcher.execute(parse);
     }
@@ -131,6 +142,10 @@ public class CommandManager {
         // todo: tie this to each output instead because multiple outputs can be used regardless of source
         //  insert a string that gets replaced?
         //      abstract the embed builder output to a mutable intermediary?
-        return source == CommandSource.DISCORD ? CONFIG.discord.prefix : "";
+        return switch (source) {
+            case DISCORD -> CONFIG.discord.prefix;
+            case IN_GAME_PLAYER -> CONFIG.inGameCommands.prefix;
+            case TERMINAL -> "";
+        };
     }
 }

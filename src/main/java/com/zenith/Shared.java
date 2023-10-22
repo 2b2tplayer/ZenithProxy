@@ -16,6 +16,7 @@ import com.github.steveice10.mc.protocol.packet.ingame.clientbound.level.border.
 import com.github.steveice10.mc.protocol.packet.ingame.clientbound.title.ClientboundSetActionBarTextPacket;
 import com.github.steveice10.mc.protocol.packet.ingame.clientbound.title.ClientboundSetSubtitleTextPacket;
 import com.github.steveice10.mc.protocol.packet.ingame.serverbound.*;
+import com.github.steveice10.mc.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
 import com.github.steveice10.mc.protocol.packet.ingame.serverbound.level.ServerboundTeleportToEntityPacket;
 import com.github.steveice10.mc.protocol.packet.ingame.serverbound.player.*;
 import com.github.steveice10.mc.protocol.packet.login.clientbound.ClientboundGameProfilePacket;
@@ -29,6 +30,7 @@ import com.zenith.command.CommandManager;
 import com.zenith.database.DatabaseManager;
 import com.zenith.discord.DiscordBot;
 import com.zenith.event.SimpleEventBus;
+import com.zenith.feature.api.VcApi;
 import com.zenith.feature.language.LanguageManager;
 import com.zenith.feature.pathing.Pathing;
 import com.zenith.feature.pathing.blockdata.BlockDataManager;
@@ -46,16 +48,13 @@ import com.zenith.network.client.handler.incoming.spawn.AddExperienceOrbHandler;
 import com.zenith.network.client.handler.incoming.spawn.AddPlayerHandler;
 import com.zenith.network.client.handler.incoming.spawn.SpawnPositionHandler;
 import com.zenith.network.client.handler.outgoing.OutgoingChatHandler;
+import com.zenith.network.client.handler.outgoing.OutgoingContainerClickHandler;
 import com.zenith.network.client.handler.postoutgoing.*;
 import com.zenith.network.registry.HandlerRegistry;
 import com.zenith.network.server.ServerConnection;
-import com.zenith.network.server.handler.player.incoming.ChatCommandHandler;
-import com.zenith.network.server.handler.player.incoming.ChatHandler;
-import com.zenith.network.server.handler.player.incoming.ClientInformationHandler;
-import com.zenith.network.server.handler.player.incoming.PongHandler;
-import com.zenith.network.server.handler.player.incoming.movement.SwingHandler;
+import com.zenith.network.server.handler.player.InGameCommandManager;
+import com.zenith.network.server.handler.player.incoming.*;
 import com.zenith.network.server.handler.player.outgoing.SystemChatOutgoingHandler;
-import com.zenith.network.server.handler.player.postoutgoing.ClientCommandHandler;
 import com.zenith.network.server.handler.player.postoutgoing.LoginPostHandler;
 import com.zenith.network.server.handler.shared.incoming.HelloHandler;
 import com.zenith.network.server.handler.shared.incoming.KeepAliveHandler;
@@ -108,11 +107,18 @@ public class Shared {
     public static final String SYSTEM_DISCONNECT = "System disconnect";
     public static final String MANUAL_DISCONNECT = "Manual Disconnect";
     public static final String AUTO_DISCONNECT = "AutoDisconnect";
+    public static final String LOGIN_FAILED = "Login Failed";
     public static boolean isReconnectableDisconnect(final String reason) {
-        if (reason.equals(SYSTEM_DISCONNECT) || reason.equals(MANUAL_DISCONNECT) || reason.equals(MinecraftConstants.SERVER_CLOSING_MESSAGE)) {
+        if (reason.equals(SYSTEM_DISCONNECT)
+            || reason.equals(MANUAL_DISCONNECT)
+            || reason.equals(MinecraftConstants.SERVER_CLOSING_MESSAGE)
+            || reason.equals(LOGIN_FAILED)
+        ) {
             return false;
         } else if (reason.equals(AUTO_DISCONNECT)) {
-            return (!CONFIG.client.extra.utility.actions.autoDisconnect.cancelAutoReconnect && !Proxy.getInstance().getIsPrio().orElse(false));
+            return (!CONFIG.client.extra.utility.actions.autoDisconnect.cancelAutoReconnect && !Proxy.getInstance()
+                .getIsPrio()
+                .orElse(false));
         } else {
             return true;
         }
@@ -131,8 +137,10 @@ public class Shared {
     public static final ModuleManager MODULE_MANAGER;
     public static final Pathing PATHING;
     public static final TerminalManager TERMINAL_MANAGER;
+    public static final InGameCommandManager IN_GAME_COMMAND_MANAGER;
     public static final CommandManager COMMAND_MANAGER;
     public static final LanguageManager LANGUAGE_MANAGER;
+    public static final VcApi VC_API;
     public static volatile boolean SHOULD_RECONNECT;
 
     public static final HandlerRegistry<ServerConnection> SERVER_PLAYER_HANDLERS = new HandlerRegistry.Builder<ServerConnection>()
@@ -148,8 +156,6 @@ public class Shared {
         .registerInbound(ServerboundClientInformationPacket.class, new ClientInformationHandler())
         .registerInbound(ServerboundPongPacket.class, new PongHandler())
         .registerInbound(ServerboundClientCommandPacket.class, new ClientCommandHandler())
-        //PLAYER MOVEMENT
-        .registerInbound(ServerboundSwingPacket.class, new SwingHandler())
         //
         // Outbound packets
         //
@@ -229,6 +235,7 @@ public class Shared {
         .registerInbound(ClientboundSetHealthPacket.class, new SetHealthHandler())
         .registerInbound(ClientboundSetSubtitleTextPacket.class, new SetSubtitleTextHandler())
         .registerInbound(ClientboundPlayerPositionPacket.class, new PlayerPositionHandler())
+        .registerInbound(ClientboundSoundPacket.class, new SoundHandler())
         .registerInbound(ClientboundSetExperiencePacket.class, new SetExperienceHandler())
         .registerInbound(ClientboundRespawnPacket.class, new RespawnHandler())
         .registerInbound(ClientboundContainerSetSlotPacket.class, new ContainerSetSlotHandler())
@@ -276,6 +283,7 @@ public class Shared {
         .registerInbound(ClientboundSetDefaultSpawnPositionPacket.class, new SpawnPositionHandler())
         // Outbound
         .registerOutbound(ServerboundChatPacket.class, new OutgoingChatHandler())
+        .registerOutbound(ServerboundContainerClickPacket.class, new OutgoingContainerClickHandler())
         //Postoutgoing
         .registerPostOutbound(ServerboundPlayerCommandPacket.class, new PostOutgoingPlayerCommandHandler())
         .registerPostOutbound(ServerboundSetCarriedItemPacket.class, new PostOutgoingSetCarriedItemHandler())
@@ -283,6 +291,7 @@ public class Shared {
         .registerPostOutbound(ServerboundMovePlayerPosRotPacket.class, new PostOutgoingPlayerPositionRotationHandler())
         .registerPostOutbound(ServerboundMovePlayerRotPacket.class, new PostOutgoingPlayerRotationHandler())
         .registerPostOutbound(ServerboundMovePlayerStatusOnlyPacket.class, new PostOutgoingPlayerStatusOnlyHandler())
+        .registerPostOutbound(ServerboundSwingPacket.class, new PostOutgoingSwingHandler())
         .build();
 
     public static synchronized void loadConfig() {
@@ -405,8 +414,10 @@ public class Shared {
             MODULE_MANAGER = new ModuleManager();
             PATHING = new Pathing();
             TERMINAL_MANAGER = new TerminalManager();
+            IN_GAME_COMMAND_MANAGER = new InGameCommandManager();
             COMMAND_MANAGER = new CommandManager();
             LANGUAGE_MANAGER = new LanguageManager();
+            VC_API = new VcApi();
             TranslationRegistry translationRegistry = TranslationRegistry.create(Key.key("minecraft"));
             translationRegistry.registerAll(Locale.ENGLISH, LANGUAGE_MANAGER.getLanguageDataMap());
             GlobalTranslator.translator().addSource(translationRegistry);

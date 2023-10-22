@@ -7,7 +7,6 @@ import com.zenith.Proxy;
 import com.zenith.cache.DataCache;
 import com.zenith.network.registry.PostOutgoingHandler;
 import com.zenith.network.server.ServerConnection;
-import com.zenith.util.RefStrings;
 import de.themoep.minedown.adventure.MineDown;
 import lombok.NonNull;
 
@@ -22,7 +21,7 @@ public class LoginPostHandler implements PostOutgoingHandler<ClientboundLoginPac
             session.disconnect("Login without whitelist check?");
             return;
         }
-        session.send(new ClientboundCustomPayloadPacket("minecraft:brand", RefStrings.BRAND_SUPPLIER.get()));
+        session.send(new ClientboundCustomPayloadPacket("minecraft:brand", CACHE.getChunkCache().getServerBrand()));
         session.setLoggedIn(); // allows server packets to start being sent to player
         // send cached data
         DataCache.sendCacheData(CACHE.getAllData(), session);
@@ -48,6 +47,11 @@ public class LoginPostHandler implements PostOutgoingHandler<ClientboundLoginPac
         }
         if (CONFIG.client.extra.chat.hideDeathMessages) {
             session.send(new ClientboundSystemChatPacket(MineDown.parse("&7Death messages are currently disabled. To enable death messages, type &c/toggledeathmsgs&7."), false));
+        }
+        session.send(new ClientboundSystemChatPacket(MineDown.parse("&7[&9ZenithProxy&7]&r &2Connected to &r&c" + CACHE.getProfileCache().getProfile().getName()), false));
+        if (CONFIG.inGameCommands.enable) {
+            session.send(new ClientboundSystemChatPacket(MineDown.parse("&2Command Prefix : \"" + CONFIG.inGameCommands.prefix + "\""), false));
+            session.send(new ClientboundSystemChatPacket(MineDown.parse("&chelp &7- &8List Commands"), false));
         }
     }
 }

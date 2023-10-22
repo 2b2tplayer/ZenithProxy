@@ -2,6 +2,8 @@ package com.zenith.util.math;
 
 import lombok.experimental.UtilityClass;
 
+import java.time.Duration;
+
 @UtilityClass
 public class MathHelper {
     public static double squaredMagnitude(double a, double b, double c) {
@@ -41,7 +43,28 @@ public class MathHelper {
         return f;
     }
 
+    public static float wrapPitch(float pitch) {
+        float f = pitch % 180.0F;
+        if (f >= 90.0F) f -= 180.0F;
+        if (f < -90.0F) f += 180.0F;
+        return f;
+    }
+
+    public static float wrapYaw(float yaw) {
+        return wrapDegrees(yaw);
+    }
+
     public static float clamp(final float value, final float min, final float max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    // is this math? no, but idk where else to put it
+    public static String formatDuration(Duration duration) {
+        final StringBuilder sb = new StringBuilder();
+        if (duration.toDaysPart() > 0) sb.append(duration.toDaysPart()).append("d ");
+        if (duration.toHoursPart() > 0) sb.append(duration.toHoursPart()).append("h ");
+        if (duration.toMinutesPart() > 0) sb.append(duration.toMinutesPart()).append("m ");
+        sb.append(duration.toSecondsPart()).append("s");
+        return sb.toString();
     }
 }

@@ -42,6 +42,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import static com.zenith.Shared.*;
+import static com.zenith.util.RefStrings.BRAND_SUPPLIER;
 
 @Getter
 @Setter
@@ -69,6 +70,7 @@ public class ChunkCache implements CachedData {
     // todo: also cache world border size changes
     //  doesn't particularly matter on 2b2t tho
     protected WorldBorderData worldBorderData = WorldBorderData.DEFAULT;
+    protected byte[] serverBrand = BRAND_SUPPLIER.get();
 
     public ChunkCache() {
         SCHEDULED_EXECUTOR_SERVICE.scheduleAtFixedRate(this::reapDeadChunks,
@@ -349,15 +351,15 @@ public class ChunkCache implements CachedData {
             consumer.accept(new ClientboundSetChunkCacheRadiusPacket(serverViewDistance));
             consumer.accept(new ClientboundSetChunkCacheCenterPacket(centerX, centerZ));
             readCache(() -> {
-                this.cache.values().parallelStream()
-                    .map(chunk -> new ClientboundLevelChunkWithLightPacket(
+                for (final Chunk chunk : this.cache.values()) {
+                    consumer.accept(new ClientboundLevelChunkWithLightPacket(
                         chunk.x,
                         chunk.z,
                         chunk.serialize(CACHE.getChunkCache().getCodec()),
                         chunk.heightMaps,
                         chunk.blockEntities.toArray(new BlockEntityInfo[0]),
-                        chunk.lightUpdateData))
-                    .forEach(consumer);
+                        chunk.lightUpdateData));
+                }
                 return true;
             });
         } catch (Exception e) {
@@ -389,6 +391,7 @@ public class ChunkCache implements CachedData {
                 this.serverSimulationDistance = -1;
                 this.registryTag = null;
                 this.worldBorderData = WorldBorderData.DEFAULT;
+                this.serverBrand = BRAND_SUPPLIER.get();
             }
             return true;
         });

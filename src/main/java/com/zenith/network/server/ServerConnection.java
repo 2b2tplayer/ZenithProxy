@@ -38,8 +38,6 @@ import javax.crypto.SecretKey;
 import java.io.IOException;
 import java.net.SocketAddress;
 import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -94,20 +92,20 @@ public class ServerConnection implements Session, SessionListener {
     @Override
     public void packetReceived(Session session, Packet packet) {
         try {
-            if (!isSpectator()) {
-                this.lastPacket = System.currentTimeMillis();
-                if (((MinecraftProtocol) this.session.getPacketProtocol()).getState() == ProtocolState.GAME
-                        && ((MinecraftProtocol) Proxy.getInstance().getClient().getPacketProtocol()).getState() == ProtocolState.GAME
-                        && this.isLoggedIn
-                        && SERVER_PLAYER_HANDLERS.handleInbound(packet, this)) {
-                    Proxy.getInstance().getClient().send(packet);
+            if (isSpectator()) {
+                if (this.isLoggedIn
+                    && ((MinecraftProtocol) Proxy.getInstance().getClient().getPacketProtocol()).getState() == ProtocolState.GAME
+                    && SERVER_SPECTATOR_HANDLERS.handleInbound(packet, this)) {
+                    // there's no use case for this so I'm just disabling sending it to the client
+                    // we still want spectator handlers to process the packet though
+//                    Proxy.getInstance().getClient().sendAsync(packet);
                 }
             } else {
-                if (((MinecraftProtocol) this.session.getPacketProtocol()).getState() == ProtocolState.GAME
-                        && ((MinecraftProtocol) Proxy.getInstance().getClient().getPacketProtocol()).getState() == ProtocolState.GAME
-                        && this.isLoggedIn
-                        && SERVER_SPECTATOR_HANDLERS.handleInbound(packet, this)) {
-                    Proxy.getInstance().getClient().send(packet);
+                this.lastPacket = System.currentTimeMillis();
+                if (this.isLoggedIn // also checks if we're in the game state
+                    && ((MinecraftProtocol) Proxy.getInstance().getClient().getPacketProtocol()).getState() == ProtocolState.GAME
+                    && SERVER_PLAYER_HANDLERS.handleInbound(packet, this)) {
+                    Proxy.getInstance().getClient().sendAsync(packet);
                 }
             }
         } catch (final Exception e) {
@@ -118,13 +116,9 @@ public class ServerConnection implements Session, SessionListener {
     @Override
     public Packet packetSending(final Session session, final Packet packet) {
         try {
-            Packet p2;
-            if (!isSpectator()) {
-                p2 = SERVER_PLAYER_HANDLERS.handleOutgoing(packet, this);
-            } else {
-                p2 = SERVER_SPECTATOR_HANDLERS.handleOutgoing(packet, this);
-            }
-            return p2;
+            return isSpectator()
+                ? SERVER_SPECTATOR_HANDLERS.handleOutgoing(packet, this)
+                : SERVER_PLAYER_HANDLERS.handleOutgoing(packet, this);
         } catch (final Exception e) {
             SERVER_LOG.error("Failed handling packet sending: " + packet.getClass().getSimpleName(), e);
         }
@@ -135,11 +129,10 @@ public class ServerConnection implements Session, SessionListener {
     @Override
     public void packetSent(Session session, Packet packet) {
         try {
-            if (!isSpectator()) {
-                SERVER_PLAYER_HANDLERS.handlePostOutgoing(packet, this);
-            } else {
+            if (isSpectator())
                 SERVER_SPECTATOR_HANDLERS.handlePostOutgoing(packet, this);
-            }
+            else
+                SERVER_PLAYER_HANDLERS.handlePostOutgoing(packet, this);
         } catch (final Exception e) {
             SERVER_LOG.error("Failed handling PostOutgoing packet: " + packet.getClass().getSimpleName(), e);
         }
@@ -249,13 +242,8 @@ public class ServerConnection implements Session, SessionListener {
     }
 
     @Override
-    public void sendAsync(@NonNull final Packet packet, @NonNull final ExecutorService executorService) {
-        this.session.sendAsync(packet, executorService);
-    }
-
-    @Override
-    public void sendScheduledAsync(@NonNull final Packet packet, @NonNull final ScheduledExecutorService executorService, final long delay, final TimeUnit unit) {
-        this.session.sendScheduledAsync(packet, executorService, delay, unit);
+    public void sendScheduledAsync(@NonNull final Packet packet, final long delay, final TimeUnit unit) {
+        this.session.sendScheduledAsync(packet, delay, unit);
     }
 
     public boolean isActivePlayer() {
@@ -316,7 +304,7 @@ public class ServerConnection implements Session, SessionListener {
     }
 
     public synchronized void syncTeamMembers() {
-        final List<String> teamMembers = Proxy.getInstance().getSpectatorConnections().stream()
+        final List<String> teamMembers = Proxy.getInstance().getSpectatorConnections()
             .map(ServerConnection::getSpectatorEntityUUID)
             .map(UUID::toString)
             .collect(Collectors.toCollection(ArrayList::new));
@@ -328,14 +316,14 @@ public class ServerConnection implements Session, SessionListener {
             .filter(member -> !currentTeamMembers.contains(member))
             .toList();
         if (!toRemove.isEmpty()) {
-            send(new ClientboundSetPlayerTeamPacket(
+            sendAsync(new ClientboundSetPlayerTeamPacket(
                 teamName,
                 TeamAction.REMOVE_PLAYER,
                 toRemove.toArray(new String[0])
             ));
         }
         if (!toAdd.isEmpty()) {
-            send(new ClientboundSetPlayerTeamPacket(
+            sendAsync(new ClientboundSetPlayerTeamPacket(
                 teamName,
                 TeamAction.ADD_PLAYER,
                 toAdd.toArray(new String[0])

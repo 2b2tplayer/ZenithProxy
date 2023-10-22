@@ -38,14 +38,15 @@ public class ModuleManager {
 
     public void init() {
         asList(
-            new PlayerSimulation(),
             new AntiAFK(),
             new AutoDisconnect(),
             new AutoEat(),
+            new AutoFish(),
             new AutoReply(),
             new AutoRespawn(),
             new AutoTotem(),
             new KillAura(),
+            new PlayerSimulation(),
             new Spammer(),
             new Spook()
         ).forEach(m -> {
@@ -84,7 +85,7 @@ public class ModuleManager {
     }
 
     public void handlePlayerOnlineEvent(final PlayerOnlineEvent event) {
-        if (Proxy.getInstance().getActiveConnections().isEmpty()) {
+        if (!Proxy.getInstance().hasActivePlayer()) {
             startClientTicks();
         }
     }
@@ -124,9 +125,7 @@ public class ModuleManager {
         synchronized (this) {
             if (nonNull(this.clientTickFuture)) {
                 this.clientTickFuture.cancel(false);
-                while (!this.clientTickFuture.isDone()) {
-                    Wait.waitALittleMs(50);
-                }
+                Wait.waitUntilCondition(() -> this.clientTickFuture.isDone(), 1);
                 getModules().forEach(Module::clientTickStopped);
             }
         }
