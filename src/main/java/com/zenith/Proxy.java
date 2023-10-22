@@ -576,9 +576,7 @@ public class Proxy {
                 if (DISCORD_BOT.isRunning()) {
                     if (CONFIG.discord.manageProfileImage) DISCORD_BOT.updateProfileImage(this.serverIcon);
                     if (CONFIG.discord.manageNickname) DISCORD_BOT.setBotNickname(CONFIG.authentication.username + " | ZenithProxy");
-                    if (CONFIG.discord.manageDescription) DISCORD_BOT.setBotDescription("ZenithProxy " + LAUNCH_CONFIG.version
-                                                                                            + "\n\n**Official Discord**:\n  https://discord.gg/nJZrSaRKtb"
-                                                                                            + "\n**Github**:\n  https://github.com/rfresh2/ZenithProxy");
+                    if (CONFIG.discord.manageDescription) DISCORD_BOT.setBotDescription("2b2tplayer's fork of ZenithProxy ");
                 }
             }
         } catch (Exception e) {
